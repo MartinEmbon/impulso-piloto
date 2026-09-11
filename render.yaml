@@ -2,21 +2,16 @@ services:
   - type: web
     name: impulso-empleo
     runtime: node
-    plan: 0.5c-512mb
+    plan: free
     buildCommand: npm run build
     startCommand: npm start
-    healthCheckPath: /api/health
-    disk:
-      name: impulso-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: 24.19.0
       - key: NODE_ENV
         value: production
       - key: DATA_DIR
-        value: /var/data
+        value: ./data
       - key: INSTITUTION_CODE
         sync: false
       - key: ADMIN_CODE
