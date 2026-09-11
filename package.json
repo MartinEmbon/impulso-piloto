@@ -1,0 +1,1 @@
+{"name":"impulso-empleo","version":"0.1.0","private":true,"type":"module","engines":{"node":">=24 <25"},"scripts":{"start":"node server.mjs","build":"node --check server.mjs && node --check dist/app.js","test":"node --test tests/*.test.mjs"}}

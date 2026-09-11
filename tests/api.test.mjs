@@ -1,0 +1,30 @@
+import {test,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const dir=mkdtempSync(join(tmpdir(),'impulso-test-'));const child=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:'3127',NODE_ENV:'test',DATA_DIR:dir,INSTITUTION_CODE:'test-student',ADMIN_CODE:'test-admin',OPENAI_API_KEY:'',OPENAI_MODEL:''},stdio:['ignore','pipe','pipe']});
+await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('Server exited '+code)))});
+after(async()=>{child.kill();await new Promise(r=>child.once('exit',r));rmSync(dir,{recursive:true,force:true})});
+async function call(p,data,cookie){const r=await fetch('http://localhost:3127'+p,{method:data?'POST':'GET',headers:{...(data?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});return{status:r.status,cookie:r.headers.get('set-cookie')?.split(';')[0],body:await r.json()}}
+test('Pilot: isolation, grading, persistence, roles, logout, limits and content',async()=>{
+ const cat=await call('/api/catalog');assert.equal(cat.body.lessons.length,4);assert.equal(cat.body.lessons[0].questions[0].correct,undefined);
+ assert.equal((await call('/api/institution')).status,403);
+ assert.equal((await call('/api/register',{name:'Bad',email:'bad@example.com',password:'longpassword123',code:'wrong'})).status,403);
+ const s=await call('/api/register',{name:'Alumno',email:'student@example.com',password:'longpassword123',code:'test-student'});assert.equal(s.status,200);assert.equal(s.body.user.role,'student');
+ assert.equal((await call('/api/institution',null,s.cookie)).status,403);
+ assert.equal((await call('/api/grade',{lesson:'resolver',answers:[1,2]},s.cookie)).status,403);
+ assert.equal((await call('/api/grade',{lesson:'escuchar',answers:[100,1]},s.cookie)).status,400);
+ const grade=await call('/api/grade',{lesson:'escuchar',answers:[0,1]},s.cookie);assert.equal(grade.body.score,100);assert.equal(grade.body.saved,true);
+ await call('/api/grade',{lesson:'escuchar',answers:[1,0]},s.cookie);
+ const me=await call('/api/me',null,s.cookie);assert.equal(me.body.progress.length,1);assert.equal(me.body.progress[0].score,100);assert.equal(me.body.progress[0].attempts,2);
+ assert.equal((await call('/api/grade',{lesson:'preguntar',answers:[0,2]},s.cookie)).status,200);
+ assert.equal((await call('/api/coach',{lesson:'escuchar',answer:'Entiendo la molestia, puedo revisar el pedido.'},s.cookie)).status,503);
+ const a=await call('/api/register',{name:'Coordinador',email:'admin@example.com',password:'longpassword123',code:'test-admin'});assert.equal(a.body.user.role,'admin');
+ const metrics=await call('/api/institution',null,a.cookie);assert.equal(metrics.body.students.length,1);assert.equal(metrics.body.students[0].completed,2);
+ await call('/api/logout',{},s.cookie);assert.equal((await call('/api/me',null,s.cookie)).body.user,null);
+ const login=await call('/api/login',{email:'student@example.com',password:'longpassword123'});assert.equal(login.status,200);assert.equal((await call('/api/me',null,login.cookie)).body.progress.length,2);
+ const staticFile=await fetch('http://localhost:3127/server.mjs');assert.equal(staticFile.status,404);
+ const csrf=await fetch('http://localhost:3127/api/logout',{method:'POST',headers:{Origin:'https://evil.invalid','Content-Type':'application/json'},body:'{}'});assert.equal(csrf.status,403);
+});
